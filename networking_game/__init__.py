@@ -8,12 +8,12 @@ TwoStep networking game: players sequentially add/delete ties until n*rate steps
 
 class Constants(BaseConstants):
     name_in_url = 'twostep'
-    players_per_group = 3
+    players_per_group = 10
     num_rounds = 1
     rate = 2  # steps per player
     density = 0.03  # network density
     # rewards
-    p_out = 0.5
+    p_out = -0.5
     p_recip = 3
     p_triad = 2
 

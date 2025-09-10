@@ -15,7 +15,7 @@
 
 
 #left-column {
-    flex: 2;
+    flex: 1.5;
 }
 
 #right-column {
@@ -141,12 +141,18 @@
     </div>
 
     <div id="right-column">
-        <div id="instructions">
-            <strong>Instructions:</strong><br>
-            <p>Each round, players sequentially take a <em>ministep</em>: create or delete a tie with another player, or do nothing.</p>
-            <p>The table below shows the points you can earn based on your position in the network.</p>
-            <p>Players get to make between {{ min_steps }} and {{ max_steps}} ministeps. Your goal is to maximize your points!</p>
-        </div>
+   <div id="instructions">
+    <strong>Instructions:</strong><br>
+    <p>Each round, players sequentially take a <em>ministep</em>: They create or delete an outgoing tie to another player, or do nothing.</p>
+         <ul style="list-style: none; padding-left: 0;">
+    <li><span style="display:inline-block; width:20px; height:20px; background-color:#FFCC00; border-radius:50%; margin-right:6px;"></span>YOU</li>
+    <li><span style="display:inline-block; width:20px; height:20px; background-color:#90ee90; border-radius:50%; margin-right:6px;"></span>Current turn</li>
+    <li><span style="display:inline-block; width:20px; height:20px; background-color:#97C2FC; border-radius:50%; margin-right:6px;"></span>Waiting</li>
+</ul>
+
+    <p>The table below shows the points players can earn based on their position in the network.</p>
+    <p>Players get to make between {{ min_steps }} and {{ max_steps }} ministeps. Your goal is to maximize your points!</p>
+     </div>
 
         <div id="points-display">
             <h5>Your points</h5>
@@ -154,7 +160,7 @@
                 <thead>
                     <tr>
                         <th>Relationship</th>
-                        <th>Reward</th>
+                        <th>Payoff</th>
                         <th>Count</th>
                         <th>Points</th>
                     </tr>
@@ -171,10 +177,11 @@
             <button id="points-info-btn">?</button>
             <div id="points-info">
                 Points are calculated based on your network ties:<br><br>
-                - <strong>Outgoing tie (→):</strong> you initiate a tie to another player<br>
-                - <strong>Mutual tie (⇄):</strong> both you and another player have a tie to each other<br>
-                - <strong>Closed triad (△):</strong> a triangle of ties in which you have at least one outgoing tie<br>
-              <br>
+                - <strong>Outgoing tie:</strong> you initiate a tie to another player (A→B).<br>
+                - <strong>Mutual tie:</strong> both you and another player have a tie to each other (A→B, B→A).<br>
+                - <strong>Directed 3-cycle:</strong> a loop of three players (A→B, B→C, C→A).
+                You score when you are part of such a cycle.<br>
+                <br>
                 Each type contributes to your total points.
             </div>
         </div>
@@ -233,7 +240,7 @@ function getCandidateNodes() {
     return candidates;
 }
 
-// ------------------------- Update Graph -------------------------
+// ------------------------- update graph -------------------------
 function updateNodeStyles() {
     if (!network) return;
     const nodes = network.body.data.nodes;
@@ -247,23 +254,37 @@ function updateNodeStyles() {
 
         const pts = pointsBreakdown[playerId-1] || { total: 0 };
 
-        let color = playerId === myIndex ? {
-            background: '#FFCC00',
-            border: '#B8860B',
-            highlight: { background: '#cc9900', border: '#665500' },
-            hover: { background: '#ffdb4d', border: '#b38600' }
-        } : {
-            background: '#97C2FC',
-            border: '#2B7CE9',
-            highlight: { background: '#0057b8', border: '#003d7a' },
-            hover: { background: '#3399ff', border: '#0057b8' }
-        };
+        // Default colors
+        let color;
+        if (playerId === myIndex) {
+            color = {
+                background: '#FFCC00',
+                border: '#B8860B',
+                highlight: { background: '#cc9900', border: '#665500' },
+                hover: { background: '#ffdb4d', border: '#b38600' }
+            };
+        } else if (playerId === whoseTurn) { // highlight current turn
+            color = {
+                background: '#90ee90',   // light green
+                border: '#008000',
+                highlight: { background: '#66cc66', border: '#004d00' },
+                hover: { background: '#99ff99', border: '#006600' }
+            };
+        } else {
+            color = {
+                background: '#97C2FC',
+                border: '#2B7CE9',
+                highlight: { background: '#0057b8', border: '#003d7a' },
+                hover: { background: '#3399ff', border: '#0057b8' }
+            };
+        }
 
         let size = candidates.includes(playerId) ? 26 : 20;
         let borderWidth = candidates.includes(playerId) ? 4 : 1;
 
-        nodes.update({id: playerId,
-          color, size, borderWidth, title: `Player ${playerId}`}); }}
+        nodes.update({id: playerId, color, size, borderWidth, title: `Player ${playerId}`});
+    }
+}
 
 function updateGraph() {
     const n = networkState.length;
@@ -278,7 +299,11 @@ function updateGraph() {
     for (let i = 0; i < n; i++) {
         for (let j = 0; j < n; j++) {
             if (networkState[i][j] === 1) {
-                edges.push({ id: `edge_${i+1}_${j+1}`, from: i + 1, to: j + 1, arrows: 'to', width: 3, color: { color: '#848484', opacity: 0.5 }, smooth: false });
+                edges.push({ id: `edge_${i+1}_${j+1}`, from: i + 1, to: j + 1, arrows: 'to', width: 3, color: { color: '#848484', opacity: 0.5 }, smooth: {
+        enabled: true,
+        type: "curvedCW",
+        roundness: 0
+    } });
             }
         }
     }
@@ -316,7 +341,7 @@ function highlightCell(cell, type) {
     }
 }
 
-// ------------------------- Points Display -------------------------
+// ------------------------- points display -------------------------
 let previousPoints = { out: 0, recip: 0, triad: 0, total: 0 };
 
 function updatePointsDisplay() {
@@ -326,7 +351,7 @@ function updatePointsDisplay() {
     const rewardTypes = [
         { name: 'Outgoing tie', symbol: '→', value: {{ Constants.p_out }}, key: 'out', count: p.out / {{ Constants.p_out }} },
         { name: 'Mutual tie', symbol: '⇄', value: {{ Constants.p_recip }}, key: 'recip', count: p.recip / {{ Constants.p_recip }} },
-        { name: 'Closed triad', symbol: '△', value: {{ Constants.p_triad }}, key: 'triad', count: p.triad / {{ Constants.p_triad }} }
+        { name: 'Directed 3-cycle', symbol: '⟳', value: {{ Constants.p_triad }}, key: 'triad', count: p.triad / {{ Constants.p_triad }} }
     ];
 
     rewardTypes.forEach((r, idx) => {
@@ -352,36 +377,41 @@ function updatePointsDisplay() {
 
         tdCount.textContent = count;
         tdCount.style.textAlign = 'center';
-
         tdPoints.textContent = points;
         tdPoints.style.textAlign = 'center';
 
+        // Remove old highlights
         tdCount.classList.remove('highlight-green', 'highlight-red');
         tdPoints.classList.remove('highlight-green', 'highlight-red');
 
-        if (count > previousPoints[r.key] / r.value) tdCount.classList.add('highlight-green');
-        else if (count < previousPoints[r.key] / r.value) tdCount.classList.add('highlight-red');
-
-        if (points > previousPoints[r.key]) tdPoints.classList.add('highlight-green');
-        else if (points < previousPoints[r.key]) tdPoints.classList.add('highlight-red');
+        // Highlight based on points difference
+        const prevPoints = previousPoints[r.key] || 0;
+        if (points > prevPoints) {
+            tdCount.classList.add('highlight-green');
+            tdPoints.classList.add('highlight-green');
+        } else if (points < prevPoints) {
+            tdCount.classList.add('highlight-red');
+            tdPoints.classList.add('highlight-red');
+        }
     });
 
+    // Update total points row
     const totalCell = document.getElementById('total-points');
     totalCell.textContent = p.total;
     totalCell.classList.remove('highlight-green', 'highlight-red');
     if (p.total > previousPoints.total) totalCell.classList.add('highlight-green');
     else if (p.total < previousPoints.total) totalCell.classList.add('highlight-red');
 
-
+    // Save current points for next comparison
     previousPoints = { ...p };
 
-
+    // Remove temporary highlights after 1s
     setTimeout(() => {
         tbody.querySelectorAll('td').forEach(td => td.classList.remove('highlight-green', 'highlight-red'));
         totalCell.classList.remove('highlight-green', 'highlight-red');
     }, 1000);
 }
-// ------------------------- Target Options -------------------------
+// ------------------------- Target options -------------------------
 function updateTargetOptions() {
     const action = document.getElementById('action-select').value;
     const select = document.getElementById('target-select');
