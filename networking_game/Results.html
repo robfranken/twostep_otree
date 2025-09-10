@@ -1,0 +1,110 @@
+{% extends "global/Page.html" %}
+{% load otree static %}
+
+{% block content %}
+
+<style>
+  #network-graph {
+    width: 90vw;
+    max-width: 900px;
+    height: 600px;
+    margin: 0 auto;
+    border: 1px solid lightgray;
+  }
+
+  #message {
+    text-align: center;
+    margin-top: 1em;
+    font-weight: bold;
+  }
+</style>
+
+<h3>"Two-Step": A networking game!</h3>
+<p>Round: {{ player.round_number }} / {{ Constants.num_rounds }}</p>
+
+<p>At the end of round {{ player.round_number }}, the network looks like this:</p>
+
+
+<div id="network-graph"></div>
+
+<div id="message">
+  {% if player.round_number < Constants.num_rounds %}
+    <a href="."><button>Next Round</button></a>
+  {% else %}
+    <p>Game complete. Thank you for playing!</p>
+  {% endif %}
+</div>
+
+<!-- vis-network -->
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+<script>
+  const myIndex = {{ player.id_in_group }};
+  const networkState = {{ network_state|safe }};
+  const n = networkState.length;
+
+  const nodes = [];
+  for (let i = 0; i < n; i++) {
+    const playerId = i + 1;
+    let label = playerId.toString();
+    let color = undefined;
+
+    if (playerId === myIndex) {
+      label = "YOU";
+      color = {
+        background: '#FFCC00',
+        border: '#B8860B',
+        highlight: { background: '#cc9900', border: '#665500' },
+        hover: { background: '#ffdb4d', border: '#b38600' }
+      };
+    }
+
+    nodes.push({
+      id: playerId,
+      label: label,
+      color: color,
+      font: { size: 18, face: 'Arial' },
+      borderWidth: 1,
+      shape: 'dot',
+      size: 20
+    });
+  }
+
+  const edges = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      if (networkState[i][j] === 1) {
+        edges.push({ from: i + 1, to: j + 1, arrows: 'to' });
+      }
+    }
+  }
+
+  const data = {
+    nodes: new vis.DataSet(nodes),
+    edges: new vis.DataSet(edges)
+  };
+
+  const container = document.getElementById('network-graph');
+  const options = {
+    nodes: {
+      shape: 'dot',
+      size: 20,
+      font: { size: 18, face: 'Arial' }
+    },
+    edges: {
+      arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+      color: { opacity: 0.5 }
+    },
+    physics: {
+      enabled: true,
+      solver: 'forceAtlas2Based',
+      stabilization: { iterations: 100 }
+    },
+    layout: { improvedLayout: true },
+    interaction: { tooltipDelay: 200, hideEdgesOnDrag: true }
+  };
+
+  new vis.Network(container, data, options);
+</script>
+
+{% endblock %}

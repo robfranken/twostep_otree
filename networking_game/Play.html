@@ -1,0 +1,540 @@
+{% extends "global/Page.html" %}
+{% load otree static %}
+
+{% block content %}
+
+<style>
+/* Main two-column layout */
+#main-container {
+    display: flex;
+    gap: 1em;
+    max-width: 1400px;
+    margin: 1em auto;
+    justify-content: center;
+}
+
+
+#left-column {
+    flex: 2;
+}
+
+#right-column {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1em;
+}
+
+#status {
+    text-align: center;
+    margin-top: 1em;
+    font-weight: bold;
+    font-size: 1.5em;
+}
+
+#action {
+    max-width: 1200px;
+    text-align: center;
+    margin: 1em auto;
+}
+#action select, #action button {
+    margin: 0.3em;
+    padding: 0.4em 0.6em;
+    font-size: 1em;
+}
+
+#points-table {
+    width: 100%;
+    table-layout: auto;
+}
+
+#target-select {
+    width: 6em;
+}
+
+#network-graph {
+    width: 100%;
+    height: 600px;
+    border: 1px solid lightgray;
+}
+
+#instructions {
+    padding: 1em;
+    border: 1px solid #90c3d4;
+    background-color: #e6f2f8;
+    border-radius: 8px;
+    font-size: 1em;
+    line-height: 1.5em;
+}
+
+#points-display {
+  font-size: 0.85em;
+    padding: 0.5em;
+    border: 1px solid #ccc;
+    background-color: #f9f9f9;
+    overflow-x: auto;
+}
+#points-display table {
+    width: 100%;
+    border-collapse: collapse;
+}
+#points-display th, #points-display td {
+    padding: 4px 8px;
+    text-align: center;
+    border-bottom: 1px solid #ccc;
+    transition: background-color 1s ease;
+}
+
+#points-display th:first-child,
+#points-display td:first-child {
+    text-align: left;
+    padding-left: 8px;
+}
+.highlight-green { background-color: #d4edda; }
+.highlight-red { background-color: #f8d7da; }
+
+#points-info-btn {
+    cursor: pointer;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    font-weight: bold;
+    border: 1px solid #31708f;
+    background-color: #e6f2f8;
+    color: #31708f;
+}
+#points-info {
+    display: none;
+    margin-top: 0.5em;
+    padding: 0.5em;
+    border: 1px solid #ccc;
+    background-color: #f9f9f9;
+    border-radius: 5px;
+    font-size: 0.9em;
+    line-height: 1.3em;
+}
+
+@media (max-width: 900px) {
+    #main-container {
+        flex-direction: column;
+    }
+    #network-graph { height: 400px; }
+}
+</style>
+
+<div id="main-container">
+    <div id="left-column">
+        <div id="network-graph"></div>
+      <div id="status">Waiting for game data...</div>
+        <div id="action">
+            <label for="action-select">Action:</label>
+            <select id="action-select">
+                <option value="add">Create tie with</option>
+                <option value="delete">Delete tie with</option>
+                <option value="pass" selected>Do nothing</option>
+            </select>
+            <label for="target-select">Player:</label>
+            <select id="target-select"></select>
+            <button id="send-button">Submit</button>
+        </div>
+
+    </div>
+
+    <div id="right-column">
+        <div id="instructions">
+            <strong>Instructions:</strong><br>
+            <p>Each round, players sequentially take a <em>ministep</em>: create or delete a tie with another player, or do nothing.</p>
+            <p>The table below shows the points you can earn based on your position in the network.</p>
+            <p>Players get to make between {{ min_steps }} and {{ max_steps}} ministeps. Your goal is to maximize your points!</p>
+        </div>
+
+        <div id="points-display">
+            <h5>Your points</h5>
+            <table id="points-table">
+                <thead>
+                    <tr>
+                        <th>Relationship</th>
+                        <th>Reward</th>
+                        <th>Count</th>
+                        <th>Points</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+                <tfoot>
+                    <tr>
+                        <th colspan="2" style="text-align:right;">Total points</th>
+                        <th id="total-points" colspan="2"></th>
+                    </tr>
+                </tfoot>
+            </table>
+          <br>
+            <button id="points-info-btn">?</button>
+            <div id="points-info">
+                Points are calculated based on your network ties:<br><br>
+                - <strong>Outgoing tie (→):</strong> you initiate a tie to another player<br>
+                - <strong>Mutual tie (⇄):</strong> both you and another player have a tie to each other<br>
+                - <strong>Closed triad (△):</strong> a triangle of ties in which you have at least one outgoing tie<br>
+              <br>
+                Each type contributes to your total points.
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+<script>
+const myIndex = js_vars.my_index;
+let networkState = [];
+let whoseTurn = 0;
+let gameOver = false;
+let network;
+let pointsBreakdown = [];
+
+const originalEdgeStyles = {};
+let tempAddEdgeId = null;
+let currentRedEdgeId = null;
+
+// ------------------------- Status -------------------------
+function writeStatus(msg) {
+    document.getElementById('status').innerHTML = msg;
+}
+
+// ------------------------- Edge Handling -------------------------
+function resetEdges() {
+    if (!network) return;
+    const edges = network.body.data.edges;
+    if (tempAddEdgeId) { edges.remove(tempAddEdgeId); tempAddEdgeId = null; }
+    if (currentRedEdgeId) {
+        edges.update({ id: currentRedEdgeId, color: originalEdgeStyles[currentRedEdgeId] || { opacity: 0.5 }, dashes: false, width: 3 });
+        currentRedEdgeId = null;
+    }
+    for (const edge of edges.get()) {
+        const color = originalEdgeStyles[edge.id] || { opacity: 0.5 };
+        edges.update({ id: edge.id, color, dashes: false, width: 3 });
+    }
+}
+
+// ------------------------- Candidate Nodes -------------------------
+function getCandidateNodes() {
+    const action = document.getElementById('action-select').value;
+    const candidates = [];
+    if (whoseTurn !== myIndex || gameOver || action === 'pass') return candidates;
+
+    const n = networkState.length;
+    for (let i = 0; i < n; i++) {
+        const playerNum = i + 1;
+        if (playerNum === myIndex) continue;
+        if ((action === 'add' && networkState[myIndex - 1][i] === 0) ||
+            (action === 'delete' && networkState[myIndex - 1][i] === 1)) {
+            candidates.push(playerNum);
+        }
+    }
+    return candidates;
+}
+
+// ------------------------- Update Graph -------------------------
+function updateNodeStyles() {
+    if (!network) return;
+    const nodes = network.body.data.nodes;
+    const n = networkState.length;
+    const candidates = getCandidateNodes();
+
+    for (let i = 0; i < n; i++) {
+        const playerId = i + 1;
+        let node = nodes.get(playerId);
+        if (!node) continue;
+
+        const pts = pointsBreakdown[playerId-1] || { total: 0 };
+
+        let color = playerId === myIndex ? {
+            background: '#FFCC00',
+            border: '#B8860B',
+            highlight: { background: '#cc9900', border: '#665500' },
+            hover: { background: '#ffdb4d', border: '#b38600' }
+        } : {
+            background: '#97C2FC',
+            border: '#2B7CE9',
+            highlight: { background: '#0057b8', border: '#003d7a' },
+            hover: { background: '#3399ff', border: '#0057b8' }
+        };
+
+        let size = candidates.includes(playerId) ? 26 : 20;
+        let borderWidth = candidates.includes(playerId) ? 4 : 1;
+
+        nodes.update({id: playerId,
+          color, size, borderWidth, title: `Player ${playerId}`}); }}
+
+function updateGraph() {
+    const n = networkState.length;
+    const nodes = [];
+    const edges = [];
+
+    for (let i = 0; i < n; i++) {
+        const playerId = i + 1;
+        nodes.push({ id: playerId, label: playerId === myIndex ? "YOU" : playerId.toString(), shape: 'dot', size: 20, font: { size: 18, face: 'Arial' }, borderWidth: 1 });
+    }
+
+    for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+            if (networkState[i][j] === 1) {
+                edges.push({ id: `edge_${i+1}_${j+1}`, from: i + 1, to: j + 1, arrows: 'to', width: 3, color: { color: '#848484', opacity: 0.5 }, smooth: false });
+            }
+        }
+    }
+
+    const data = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
+    const container = document.getElementById('network-graph');
+    const options = {
+        nodes: { shape: 'dot', size: 20, font: { size: 18, face: 'Arial' } },
+        edges: { arrows: { to: { enabled: true, scaleFactor: 0.5 } }, smooth: false, color: { opacity: 0.5 }, width: 3 },
+        physics: { enabled: networkState.length > 4, solver: 'forceAtlas2Based', stabilization: { iterations: 100 } },
+        layout: { improvedLayout: true },
+        interaction: { tooltipDelay: 200, hideEdgesOnDrag: false }
+    };
+
+    if (!network) {
+        network = new vis.Network(container, data, options);
+        setupNodeClickHandler();
+    } else {
+        network.setData(data);
+    }
+
+    updateNodeStyles();
+}
+
+//highlight cells
+function highlightCell(cell, type) {
+    if (!cell) return;
+
+    cell.classList.remove('highlight-green', 'highlight-red');
+
+    if (type) {
+        void cell.offsetWidth;
+        cell.classList.add(type);
+        setTimeout(() => cell.classList.remove(type), 1000);
+    }
+}
+
+// ------------------------- Points Display -------------------------
+let previousPoints = { out: 0, recip: 0, triad: 0, total: 0 };
+
+function updatePointsDisplay() {
+    const tbody = document.querySelector('#points-table tbody');
+    const p = pointsBreakdown[myIndex - 1] || { out: 0, recip: 0, triad: 0, total: 0 };
+
+    const rewardTypes = [
+        { name: 'Outgoing tie', symbol: '→', value: {{ Constants.p_out }}, key: 'out', count: p.out / {{ Constants.p_out }} },
+        { name: 'Mutual tie', symbol: '⇄', value: {{ Constants.p_recip }}, key: 'recip', count: p.recip / {{ Constants.p_recip }} },
+        { name: 'Closed triad', symbol: '△', value: {{ Constants.p_triad }}, key: 'triad', count: p.triad / {{ Constants.p_triad }} }
+    ];
+
+    rewardTypes.forEach((r, idx) => {
+        let tr = tbody.children[idx];
+        if (!tr) {
+            tr = document.createElement('tr');
+            for (let i = 0; i < 4; i++) {
+                const td = document.createElement('td');
+                td.style.padding = '4px 8px';
+                tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+        }
+
+        const [tdName, tdValue, tdCount, tdPoints] = tr.children;
+
+        tdName.textContent = `${r.symbol} ${r.name}`;
+        tdValue.textContent = r.value;
+        tdValue.style.textAlign = 'center';
+
+        const count = r.count || 0;
+        const points = count * r.value;
+
+        tdCount.textContent = count;
+        tdCount.style.textAlign = 'center';
+
+        tdPoints.textContent = points;
+        tdPoints.style.textAlign = 'center';
+
+        tdCount.classList.remove('highlight-green', 'highlight-red');
+        tdPoints.classList.remove('highlight-green', 'highlight-red');
+
+        if (count > previousPoints[r.key] / r.value) tdCount.classList.add('highlight-green');
+        else if (count < previousPoints[r.key] / r.value) tdCount.classList.add('highlight-red');
+
+        if (points > previousPoints[r.key]) tdPoints.classList.add('highlight-green');
+        else if (points < previousPoints[r.key]) tdPoints.classList.add('highlight-red');
+    });
+
+    const totalCell = document.getElementById('total-points');
+    totalCell.textContent = p.total;
+    totalCell.classList.remove('highlight-green', 'highlight-red');
+    if (p.total > previousPoints.total) totalCell.classList.add('highlight-green');
+    else if (p.total < previousPoints.total) totalCell.classList.add('highlight-red');
+
+
+    previousPoints = { ...p };
+
+
+    setTimeout(() => {
+        tbody.querySelectorAll('td').forEach(td => td.classList.remove('highlight-green', 'highlight-red'));
+        totalCell.classList.remove('highlight-green', 'highlight-red');
+    }, 1000);
+}
+// ------------------------- Target Options -------------------------
+function updateTargetOptions() {
+    const action = document.getElementById('action-select').value;
+    const select = document.getElementById('target-select');
+    select.innerHTML = '';
+    select.value = '';
+
+    if (gameOver || whoseTurn !== myIndex) {
+        select.disabled = true;
+        document.getElementById('send-button').disabled = true;
+        return;
+    }
+
+    if (action === 'pass') {
+        select.disabled = true;
+        document.getElementById('send-button').disabled = false;
+        return;
+    }
+
+    select.disabled = false;
+    document.getElementById('send-button').disabled = false;
+
+    const candidates = getCandidateNodes();
+    if (candidates.length === 0) {
+        const option = document.createElement('option');
+        option.text = 'No valid targets';
+        option.disabled = true;
+        select.appendChild(option);
+        select.disabled = true;
+        document.getElementById('send-button').disabled = true;
+        return;
+    }
+
+    for (const playerNum of candidates) {
+        const option = document.createElement('option');
+        option.value = playerNum;
+        option.text = playerNum;
+        select.appendChild(option);
+    }
+}
+
+// ------------------------- Live Updates -------------------------
+function liveRecv(data) {
+    if ('network_state' in data) networkState = data.network_state;
+    if ('whose_turn' in data) whoseTurn = data.whose_turn;
+    if ('points_breakdown' in data) pointsBreakdown = data.points_breakdown;
+    if ('game_finished' in data) gameOver = data.game_finished;
+
+    updateGraph();
+    updatePointsDisplay();
+
+    if (whoseTurn === 0) {
+        writeStatus("Game over! Thanks for playing.");
+        document.getElementById('target-select').disabled = true;
+        document.getElementById('send-button').disabled = true;
+        document.getElementById('action-select').disabled = true;
+    } else if (whoseTurn === myIndex) {
+        writeStatus("<span style='color: green; font-weight: bold;'>It's your turn!</span> Make a <i>ministep</i>.");
+    } else {
+        writeStatus("Waiting for player " + whoseTurn + "'s ministep...");
+    }
+
+    updateTargetOptions();
+}
+
+// ------------------------- Actions -------------------------
+function sendTie() {
+    if (gameOver) return;
+    const action = document.getElementById('action-select').value;
+    const targetSelect = document.getElementById('target-select');
+    const target = parseInt(targetSelect.value);
+
+    if ((action === 'add' || action === 'delete') && !target) return;
+
+    if (action === 'add') liveSend({ add_tie: target });
+    else if (action === 'delete') liveSend({ delete_tie: target });
+    else if (action === 'pass') liveSend({ pass_turn: true });
+}
+
+// ------------------------- Node Interaction -------------------------
+function setupNodeClickHandler() {
+    network.on("click", function(params) {
+        if (params.nodes.length === 0) return;
+        const clickedId = params.nodes[0];
+        if (clickedId === myIndex) return;
+
+        const select = document.getElementById('target-select');
+        for (let i = 0; i < select.options.length; i++) {
+            if (parseInt(select.options[i].value) === clickedId) {
+                select.selectedIndex = i;
+                network.selectNodes([clickedId]);
+                highlightEdge(clickedId);
+                break;
+            }
+        }
+    });
+}
+
+function highlightEdge(clickedId) {
+    resetEdges();
+    const action = document.getElementById('action-select').value;
+    const edges = network.body.data.edges;
+
+    if (action === 'add') {
+        tempAddEdgeId = 'temp_add_edge';
+        edges.add({
+            id: tempAddEdgeId,
+            from: myIndex,
+            to: clickedId,
+            arrows: 'to',
+            color: { color: '#FFCC00', highlight: '#cc9900', opacity: 1 },
+            dashes: [5,5],
+            width: 3
+        });
+    } else if (action === 'delete') {
+        const edgeId = `edge_${myIndex}_${clickedId}`;
+        if (edges.get(edgeId)) {
+            if (!originalEdgeStyles[edgeId]) originalEdgeStyles[edgeId] = edges.get(edgeId).color;
+            edges.update({ id: edgeId, color: { color: '#FF6347', highlight: '#FF4500', opacity: 1 }, dashes: false, width: 5 });
+            currentRedEdgeId = edgeId;
+        }
+    }
+}
+
+// ------------------------- Event Listeners -------------------------
+document.getElementById('action-select').addEventListener('change', function() {
+    updateTargetOptions();
+    resetEdges();
+    updateNodeStyles();
+});
+
+document.getElementById('target-select').addEventListener('change', function () {
+    const selectedPlayer = parseInt(this.value);
+    if (!isNaN(selectedPlayer)) {
+        network.selectNodes([selectedPlayer]);
+        highlightEdge(selectedPlayer);
+    }
+});
+
+document.getElementById('send-button').addEventListener('click', function(e) {
+    e.preventDefault();
+    sendTie();
+});
+
+document.addEventListener("DOMContentLoaded", function () {
+    liveSend({});
+});
+
+document.getElementById('points-info-btn').addEventListener('click', function(event) {
+    event.preventDefault();  // prevent any form submission
+    const infoDiv = document.getElementById('points-info');
+    infoDiv.style.display = (infoDiv.style.display === 'none') ? 'block' : 'none';
+});
+
+</script>
+
+{% endblock %}
