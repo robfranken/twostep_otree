@@ -1,6 +1,6 @@
 pip install locust
 
-cd Documents\GitHub\mass_coordination_game
+cd Documents\GitHub\twostep_otree
 
 locust -f locust\locustfile.py
 
