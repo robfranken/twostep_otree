@@ -8,14 +8,14 @@ SESSION_CONFIGS = [
         app_sequence=['networking_game'],
 	    completionlink='https://app.prolific.com/submissions/complete?cc=C104VFED',
 	    use_browser_bots=False
-    ),
+    )
 ]
 
 ROOMS = [
     dict(
-        name='your_study',
-        display_name='your_study',
-        #participant_label_file='_rooms/your_study.txt',
+        name='twostep',
+        display_name='TwoStep in oTree',
+        #participant_label_file='_rooms/twostep.txt',
         #use_secure_urls=True,
     ),
 ]
