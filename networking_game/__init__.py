@@ -22,12 +22,21 @@ class Subsession(BaseSubsession):
 
 class Group(BaseGroup):
     network_state = models.LongStringField(initial='')
+    starting_network = models.LongStringField(initial='')
     whose_turn = models.IntegerField(initial=1)
     num_steps = models.IntegerField(initial=0)
     game_finished = models.BooleanField(default=False)
 
 class Player(BasePlayer):
     points = models.IntegerField(initial=0)
+
+# ExtraModel to store all ministeps in
+class Action(ExtraModel):
+    group = models.Link(Group)
+    player = models.Link(Player)
+    action_type = models.StringField(choices=['add', 'delete', 'pass'])
+    target = models.IntegerField()
+    step_number = models.IntegerField()
 
 def creating_session(subsession: Subsession):
     for group in subsession.get_groups():
@@ -42,6 +51,8 @@ def creating_session(subsession: Subsession):
             adj_matrix[i][j] = 1
 
         group.network_state = json.dumps(adj_matrix)
+        # save the starting network
+        group.starting_network = group.network_state
         group.whose_turn = 1
         group.num_steps = 0
 
@@ -71,10 +82,8 @@ class Play(Page):
 
     @staticmethod
     def vars_for_template(player: Player):
-
         max_steps = Constants.rate + 2
         min_steps = max(1, Constants.rate - 2)
-
         return dict(Constants=Constants, index=player.id_in_group, max_steps=max_steps, min_steps=min_steps)
 
     @staticmethod
@@ -89,11 +98,13 @@ class Play(Page):
 
         action_taken = False
         whose_turn = group.whose_turn
-
+        action_type = None
+        target = None
 
         if not group.game_finished and group.whose_turn == player.id_in_group:
             if data.get('pass_turn'):
                 action_taken = True
+                action_type = 'pass'
             else:
                 target = data.get('add_tie') or data.get('delete_tie')
                 action_type = 'add' if 'add_tie' in data else 'delete'
@@ -115,6 +126,17 @@ class Play(Page):
                 group.num_steps += 1
                 group.network_state = json.dumps(adj_matrix)
 
+                #update ExtraModel
+                Action.create(
+                    group=group,
+                    player=player,
+                    action_type=action_type,
+                    target=target if target else None,
+                    step_number=group.num_steps
+                )
+                #print(
+                #    f"ExtraModel added: player={player.id_in_group}, action_type={action_type}, target={target}, step_number={group.num_steps}")
+
                 if group.num_steps >= n * Constants.rate:
                     group.game_finished = True
                     whose_turn = 0
@@ -122,9 +144,7 @@ class Play(Page):
                     group.whose_turn = (group.whose_turn % n) + 1
                     whose_turn = group.whose_turn
 
-        player_idx = player.id_in_group - 1
         current_points = calc_points_for_adj(adj_matrix)
-
 
         broadcast = {
             'network_state': adj_matrix,
@@ -136,5 +156,18 @@ class Play(Page):
 
         return {0: broadcast}
 
+def custom_export(players):
+    # export our ExtraModel (containing chains of ministeps)
+    yield ['session', 'participant', 'step_number', 'action', 'target']
+    for player in players:
+        participant = player.participant
+        actions = Action.filter(player=player)
+        for action in actions:
+            yield [ player.session.code,
+                    participant.code,
+                    action.step_number,
+                    action.action_type,
+                    action.target
+                    ]
 
 page_sequence = [Play]
