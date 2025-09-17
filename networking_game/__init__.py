@@ -8,10 +8,10 @@ TwoStep networking game: players sequentially add/delete ties until n*rate steps
 
 class Constants(BaseConstants):
     name_in_url = 'twostep'
-    players_per_group = 5
+    players_per_group = 10
     num_rounds = 1
     rate = 4  # steps per player
-    density = 0.03  # network density
+    density = 0.01  # network density
     # rewards
     p_out = -0.5
     p_recip = 3
@@ -101,6 +101,8 @@ class Play(Page):
         action_type = None
         target = None
 
+        last_action = None
+
         if not group.game_finished and group.whose_turn == player.id_in_group:
             if data.get('pass_turn'):
                 action_taken = True
@@ -134,9 +136,15 @@ class Play(Page):
                     target=target if target else None,
                     step_number=group.num_steps
                 )
-                #print(
-                #    f"ExtraModel added: player={player.id_in_group}, action_type={action_type}, target={target}, step_number={group.num_steps}")
 
+                # Save for broadcasting
+                last_action = {
+                    'actor': player.id_in_group,
+                    'target': target,
+                    'action_type': action_type
+                }
+
+                # Update turn
                 if group.num_steps >= n * Constants.rate:
                     group.game_finished = True
                     whose_turn = 0
@@ -152,9 +160,11 @@ class Play(Page):
             'num_steps': group.num_steps,
             'points_breakdown': current_points,
             'game_finished': group.game_finished,
+            'last_action': last_action
         }
 
         return {0: broadcast}
+
 
 def custom_export(players):
     # export our ExtraModel (containing chains of ministeps)

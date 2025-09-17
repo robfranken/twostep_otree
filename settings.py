@@ -4,7 +4,7 @@ SESSION_CONFIGS = [
     dict(
         name='networking_game',
         display_name='networking_game',
-	    num_demo_participants=20,
+	    num_demo_participants=10,
         app_sequence=['networking_game'],
 	    completionlink='https://app.prolific.com/submissions/complete?cc=C104VFED',
 	    use_browser_bots=False
